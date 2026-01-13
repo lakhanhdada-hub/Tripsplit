@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>TripSplit - Quản lý chi tiêu</title>
+    
+    <!-- Apple PWA Meta -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3037/3037241.png">
+    
+    <!-- Scripts -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+            background-color: #f8fafc;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+        .safe-top { padding-top: env(safe-area-inset-top); }
+        .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+        .animate-in { animation: fadeIn 0.2s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        ::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // Custom Icon Component
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const LucideIcon = window.lucide[name];
+            return LucideIcon ? <LucideIcon size={size} className={className} /> : null;
+        };
+
+        const App = () => {
+            // State initialization from LocalStorage
+            const [members, setMembers] = useState(() => JSON.parse(localStorage.getItem('ts_members') || '[]'));
+            const [expenses, setExpenses] = useState(() => JSON.parse(localStorage.getItem('ts_expenses') || '[]'));
+            const [contributions, setContributions] = useState(() => JSON.parse(localStorage.getItem('ts_contributions') || '[]'));
+            
+            // UI State
+            const [activeTab, setActiveTab] = useState('report');
+            const [newMemberName, setNewMemberName] = useState('');
+            const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+            const [showContributionId, setShowContributionId] = useState(null);
+            
+            // Form State
+            const [desc, setDesc] = useState('');
+            const [amount, setAmount] = useState('');
+
+            // Sync with LocalStorage
+            useEffect(() => { localStorage.setItem('ts_members', JSON.stringify(members)); }, [members]);
+            useEffect(() => { localStorage.setItem('ts_expenses', JSON.stringify(expenses)); }, [expenses]);
+            useEffect(() => { localStorage.setItem('ts_contributions', JSON.stringify(contributions)); }, [contributions]);
+
+            // Logic Calculations
+            const stats = useMemo(() => {
+                const totalSpent = expenses.reduce((s, e) => s + Number(e.amount), 0);
+                const totalIn = contributions.reduce((s, c) => s + Number(c.amount), 0);
+                const currentFund = totalIn - totalSpent;
+
+                const memberStats = members.map(m => {
+                    const paid = contributions.filter(c => c.memberId === m.id).reduce((s, c) => s + Number(c.amount), 0);
+                    // Split logic: total spent / number of members (giả định chia đều cho tất cả)
+                    const sharedCost = members.length > 0 ? totalSpent / members.length : 0;
+                    return { ...m, paid, sharedCost, balance: paid - sharedCost };
+                });
+
+                return { totalSpent, currentFund, memberStats };
+            }, [members, expenses, contributions]);
+
+            const addMember = () => {
+                if (!newMemberName.trim()) return;
+                setMembers([...members, { id: Date.now().toString(), name: newMemberName.trim() }]);
+                setNewMemberName('');
+            };
+
+            const removeMember = (id) => {
+                if(confirm("Xóa thành viên này?")) {
+                    setMembers(members.filter(m => m.id !== id));
+                    setContributions(contributions.filter(c => c.memberId !== id));
+                }
+            };
+
+            const addExpense = () => {
+                const val = parseFloat(amount);
+                if (!desc || !val) return;
+                setExpenses([{ 
+                    id: Date.now().toString(), 
+                    desc, 
+                    amount: val, 
+                    date: new Date().toLocaleDateString('vi-VN') 
+                }, ...expenses]);
+                setDesc(''); setAmount(''); setIsExpenseModalOpen(false);
+            };
+
+            const addContribution = () => {
+                const val = parseFloat(amount);
+                if (!val || !showContributionId) return;
+                setContributions([{
+                    id: Date.now().toString(),
+                    memberId: showContributionId,
+                    amount: val,
+                    date: new Date().toLocaleDateString('vi-VN')
+                }, ...contributions]);
+                setAmount(''); setShowContributionId(null);
+            };
+
+            const clearAll = () => {
+                if(confirm("Xóa toàn bộ dữ liệu chuyến đi này?")) {
+                    setMembers([]); setExpenses([]); setContributions([]);
+                }
+            };
+
+            return (
+                <div className="min-h-screen pb-32">
+                    {/* Header */}
+                    <div className={`safe-top p-6 rounded-b-[2.5rem] shadow-xl text-white transition-colors duration-500 ${stats.currentFund < 0 ? 'bg-rose-500' : 'bg-indigo-600'}`}>
+                        <div className="max-w-md mx-auto">
+                            <div className="flex justify-between items-center mb-6">
+                                <h1 className="text-xl font-black italic tracking-tighter flex items-center gap-2">
+                                    <Icon name="Zap" /> TRIPSPLIT PRO
+                                </h1>
+                                <button onClick={clearAll} className="p-2 bg-white/10 rounded-full"><Icon name="RefreshCcw" size={16}/></button>
+                            </div>
+                            
+                            <div className="bg-white/10 backdrop-blur-md rounded-[2rem] p-6 border border-white/20 flex items-center justify-between">
+                                <div className="text-center flex-1">
+                                    <p className="text-[10px] uppercase font-bold opacity-70">Quỹ còn lại</p>
+                                    <p className="text-3xl font-black">{stats.currentFund.toLocaleString()}K</p>
+                                </div>
+                                <div className="w-[1px] h-10 bg-white/20"></div>
+                                <div className="text-center flex-1">
+                                    <p className="text-[10px] uppercase font-bold opacity-70">Tổng chi</p>
+                                    <p className="text-3xl font-black">{stats.totalSpent.toLocaleString()}K</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <main className="max-w-md mx-auto p-4 mt-2">
+                        {activeTab === 'report' ? (
+                            <div className="space-y-4 animate-in">
+                                {/* Thêm thành viên */}
+                                <div className="bg-white p-2 rounded-2xl flex shadow-sm">
+                                    <input 
+                                        className="flex-1 px-4 py-3 outline-none font-bold text-sm" 
+                                        placeholder="Nhập tên người mới..."
+                                        value={newMemberName}
+                                        onChange={e => setNewMemberName(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && addMember()}
+                                    />
+                                    <button onClick={addMember} className="bg-slate-900 text-white p-3 rounded-xl">
+                                        <Icon name="UserPlus" />
+                                    </button>
+                                </div>
+
+                                {/* Danh sách thành viên */}
+                                {members.length === 0 && (
+                                    <div className="text-center py-10 text-slate-400">
+                                        <Icon name="Users" className="mx-auto mb-2 opacity-20" size={48} />
+                                        <p className="text-sm font-bold">Chưa có thành viên nào</p>
+                                    </div>
+                                )}
+
+                                {stats.memberStats.map(m => (
+                                    <div key={m.id} className="bg-white rounded-[2rem] p-5 shadow-sm border border-slate-100 relative overflow-hidden">
+                                        <div className="flex justify-between items-center mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 font-black">
+                                                    {m.name.charAt(0).toUpperCase()}
+                                                </div>
+                                                <h3 className="font-black text-slate-800 uppercase tracking-tight">{m.name}</h3>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => setShowContributionId(m.id)} className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase">Nộp quỹ</button>
+                                                <button onClick={() => removeMember(m.id)} className="text-slate-300 p-2"><Icon name="X" size={16}/></button>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="grid grid-cols-3 gap-3">
+                                            <div className="bg-slate-50 p-3 rounded-2xl text-center">
+                                                <p className="text-[9px] uppercase font-bold text-slate-400">Đã nộp</p>
+                                                <p className="font-black text-slate-700">{m.paid.toLocaleString()}K</p>
+                                            </div>
+                                            <div className="bg-slate-50 p-3 rounded-2xl text-center">
+                                                <p className="text-[9px] uppercase font-bold text-slate-400">Cần trả</p>
+                                                <p className="font-black text-slate-700">{m.sharedCost.toLocaleString(undefined, {maximumFractionDigits: 1})}K</p>
+                                            </div>
+                                            <div className={`p-3 rounded-2xl text-center ${m.balance >= 0 ? 'bg-indigo-50 text-indigo-600' : 'bg-rose-50 text-rose-600'}`}>
+                                                <p className="text-[9px] uppercase font-bold opacity-60">Dư/Nợ</p>
+                                                <p className="font-black">{m.balance.toLocaleString(undefined, {maximumFractionDigits: 1})}K</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="space-y-3 animate-in">
+                                {expenses.length === 0 && (
+                                    <div className="text-center py-10 text-slate-400">
+                                        <Icon name="FileText" className="mx-auto mb-2 opacity-20" size={48} />
+                                        <p className="text-sm font-bold">Chưa có khoản chi nào</p>
+                                    </div>
+                                )}
+                                {expenses.map(e => (
+                                    <div key={e.id} className="bg-white p-4 rounded-2xl flex justify-between items-center shadow-sm border border-slate-100">
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-12 h-12 bg-rose-50 text-rose-500 rounded-2xl flex items-center justify-center">
+                                                <Icon name="ShoppingCart" />
+                                            </div>
+                                            <div>
+                                                <p className="font-black text-slate-800">{e.desc}</p>
+                                                <p className="text-[10px] text-slate-400 font-bold uppercase">{e.date}</p>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="font-black text-rose-500">-{e.amount.toLocaleString()}K</p>
+                                            <button onClick={() => setExpenses(expenses.filter(x => x.id !== e.id))} className="text-[10px] font-bold text-slate-300 uppercase">Xóa</button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </main>
+
+                    {/* Bottom Action Bar */}
+                    <div className="fixed bottom-24 left-0 right-0 flex justify-center pointer-events-none">
+                        <button 
+                            onClick={() => setIsExpenseModalOpen(true)}
+                            className="w-16 h-16 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center pointer-events-auto active:scale-90 transition-transform border-4 border-white"
+                        >
+                            <Icon name="Plus" size={32} />
+                        </button>
+                    </div>
+
+                    {/* Navigation */}
+                    <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-100 safe-bottom p-4 flex justify-around rounded-t-[2.5rem] shadow-inner">
+                        <button onClick={() => setActiveTab('report')} className={`flex flex-col items-center gap-1 ${activeTab === 'report' ? 'text-indigo-600' : 'text-slate-300'}`}>
+                            <Icon name="LayoutGrid" />
+                            <span className="text-[10px] font-black uppercase tracking-tighter">Báo cáo</span>
+                        </button>
+                        <div className="w-16"></div>
+                        <button onClick={() => setActiveTab('history')} className={`flex flex-col items-center gap-1 ${activeTab === 'history' ? 'text-indigo-600' : 'text-slate-300'}`}>
+                            <Icon name="History" />
+                            <span className="text-[10px] font-black uppercase tracking-tighter">Lịch sử</span>
+                        </button>
+                    </nav>
+
+                    {/* Modals */}
+                    {isExpenseModalOpen && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-end">
+                            <div className="bg-white w-full rounded-t-[3rem] p-8 safe-bottom animate-in">
+                                <h2 className="text-xl font-black uppercase mb-6 italic flex items-center gap-2">
+                                    <Icon name="Edit3" /> Chi tiền từ quỹ
+                                </h2>
+                                <div className="space-y-4 mb-6">
+                                    <div className="bg-slate-50 p-4 rounded-2xl">
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Nội dung chi</p>
+                                        <input className="w-full bg-transparent outline-none font-bold" placeholder="VD: Tiền taxi, Ăn trưa..." value={desc} onChange={e=>setDesc(e.target.value)} />
+                                    </div>
+                                    <div className="bg-slate-50 p-4 rounded-2xl">
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Số tiền (K)</p>
+                                        <input type="number" className="w-full bg-transparent outline-none font-black text-3xl" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)} />
+                                    </div>
+                                </div>
+                                <button onClick={addExpense} className="w-full py-5 bg-slate-900 text-white rounded-3xl font-black uppercase shadow-xl active:scale-95 transition-all">Xác nhận chi</button>
+                                <button onClick={()=>setIsExpenseModalOpen(false)} className="w-full py-4 text-slate-400 font-bold mt-2">Đóng</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {showContributionId && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-6">
+                            <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 animate-in text-center">
+                                <div className="w-16 h-16 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <Icon name="ArrowDownCircle" size={32} />
+                                </div>
+                                <h3 className="font-black uppercase mb-2">Đóng quỹ</h3>
+                                <p className="text-sm text-slate-400 mb-6">Thành viên: <span className="text-slate-900 font-bold">{members.find(m=>m.id === showContributionId)?.name}</span></p>
+                                <input type="number" className="w-full p-5 bg-slate-50 rounded-2xl mb-6 font-black text-4xl text-center text-emerald-600 outline-none border-2 border-transparent focus:border-emerald-200" placeholder="0K" value={amount} onChange={e=>setAmount(e.target.value)} autoFocus />
+                                <div className="flex gap-3">
+                                    <button onClick={()=>setShowContributionId(null)} className="flex-1 py-4 bg-slate-100 rounded-2xl font-black uppercase text-slate-400">Hủy</button>
+                                    <button onClick={addContribution} className="flex-[2] py-4 bg-emerald-500 text-white rounded-2xl font-black uppercase shadow-lg shadow-emerald-200 active:scale-95 transition-all">Nộp tiền</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
