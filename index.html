@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>TripSplit</title>
+
+<!-- Tailwind -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- React -->
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+<!-- Babel -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
+* { -webkit-tap-highlight-color: transparent; }
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #f8fafc;
+  margin: 0;
+}
+::-webkit-scrollbar { display: none; }
+</style>
+</head>
+
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+/* =======================
+   CORE IMPORTS
+======================= */
+const { useState, useEffect, useMemo, useRef } = React;
+
+/* =======================
+   ICON SYSTEM (THAY LUCIDE)
+   — giữ tên y hệt Lucide —
+======================= */
+const Icon = ({ d, size = 20, stroke = 2.2 }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={stroke}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d={d} />
+  </svg>
+);
+
+const Plus = props => <Icon {...props} d="M12 5v14M5 12h14" />;
+const Trash2 = props => <Icon {...props} d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" />;
+const Wallet = props => <Icon {...props} d="M3 7h18v10H3zM16 12h2" />;
+const Receipt = props => <Icon {...props} d="M4 2h16v20l-4-2-4 2-4-2-4 2z" />;
+const HandCoins = props => <Icon {...props} d="M12 2v20M5 7h14" />;
+const BarChart3 = props => <Icon {...props} d="M3 3v18h18M7 14v4M12 10v8M17 6v12" />;
+const User = props => <Icon {...props} d="M20 21a8 8 0 10-16 0M12 11a4 4 0 100-8" />;
+const Crown = props => <Icon {...props} d="M3 8l4 3 5-6 5 6 4-3v10H3z" />;
+const Bell = props => <Icon {...props} d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" />;
+const Clock = props => <Icon {...props} d="M12 6v6l4 2M21 12a9 9 0 11-18 0 9 9 0 0118 0" />;
+const Share2 = props => <Icon {...props} d="M4 12v7a1 1 0 001 1h14a1 1 0 001-1v-7M12 3v12M8 7l4-4 4 4" />;
+const ArrowUpRight = props => <Icon {...props} d="M7 17L17 7M7 7h10v10" />;
+const ArrowDownLeft = props => <Icon {...props} d="M17 7L7 17M7 7h10v10" />;
+const Check = props => <Icon {...props} d="M20 6L9 17l-5-5" />;
+const X = props => <Icon {...props} d="M18 6L6 18M6 6l12 12" />;
+
+/* ===== CHƯA CÓ APP Ở PHẦN NÀY ===== */
+/* =======================
+   LOCAL STORAGE HOOK
+======================= */
+const useLocalStorage = (key, initial) => {
+  const [value, setValue] = useState(() => {
+    try {
+      const saved = localStorage.getItem(key);
+      return saved ? JSON.parse(saved) : initial;
+    } catch {
+      return initial;
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem(key, JSON.stringify(value));
+  }, [key, value]);
+
+  return [value, setValue];
+};
+
+/* =======================
+   HEADER
+======================= */
+const Header = () => (
+  <header className="flex items-center justify-center gap-2 py-4 font-black text-xl">
+    <Wallet />
+    <span>TRIPSPLIT</span>
+  </header>
+);
+
+/* =======================
+   APP CORE
+======================= */
+const App = () => {
+  const [members, setMembers] = useLocalStorage("ts_members", []);
+  const [name, setName] = useState("");
+
+  const addMember = () => {
+    if (!name.trim()) return;
+    setMembers([...members, { id: Date.now(), name: name.trim() }]);
+    setName("");
+  };
+
+  const removeMember = id =>
+    setMembers(members.filter(m => m.id !== id));
+
+  return (
+    <div className="min-h-screen max-w-md mx-auto px-4 pb-24">
+      <Header />
+
+      <div className="flex gap-2 mb-6">
+        <input
+          value={name}
+          onChange={e => setName(e.target.value)}
+          placeholder="Tên thành viên"
+          className="flex-1 px-4 py-3 rounded-xl border font-semibold outline-none"
+        />
+        <button
+          onClick={addMember}
+          className="bg-indigo-600 text-white px-4 rounded-xl active:scale-95"
+        >
+          <Plus />
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {members.map(m => (
+          <div
+            key={m.id}
+            className="bg-white p-4 rounded-2xl shadow flex items-center justify-between font-semibold"
+          >
+            <span>{m.name}</span>
+            <button
+              onClick={() => removeMember(m.id)}
+              className="text-rose-500 active:scale-90"
+            >
+              <Trash2 />
+            </button>
+          </div>
+        ))}
+
+        {members.length === 0 && (
+          <div className="text-center text-gray-400 font-semibold mt-10">
+            Chưa có thành viên nào
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* =======================
+   RENDER
+======================= */
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
