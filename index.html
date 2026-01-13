@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>TripSplit Pro Max</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+            background-color: #f8fafc;
+            margin: 0; padding: 0;
+            user-select: none;
+        }
+        .safe-top { padding-top: env(safe-area-inset-top); }
+        .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+        .modal { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); z-index: 100; }
+        .modal.active { display: flex; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        ::-webkit-scrollbar { display: none; }
+        
+        .checkbox-custom:checked + label {
+            background-color: #4f46e5;
+            color: white;
+            border-color: #4f46e5;
+        }
+        .animate-up { animation: slideUp 0.3s ease-out; }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-slate-50">
+
+    <!-- Header Stats -->
+    <div id="header-bg" class="safe-top p-6 rounded-b-[2.5rem] shadow-xl text-white transition-colors duration-500 bg-indigo-600">
+        <div class="max-w-md mx-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h1 class="text-xl font-black italic tracking-tighter flex items-center gap-2">
+                    <i data-lucide="zap" class="w-5 h-5"></i> TRIPSPLIT MAX
+                </h1>
+                <button onclick="app.clearData()" class="p-2 bg-white/10 rounded-full active:scale-90 transition-transform">
+                    <i data-lucide="refresh-ccw" class="w-4 h-4"></i>
+                </button>
+            </div>
+            
+            <div class="bg-white/10 backdrop-blur-md rounded-[2rem] p-6 border border-white/20 flex items-center justify-between">
+                <div class="text-center flex-1">
+                    <p class="text-[10px] uppercase font-bold opacity-70">Quỹ hiện tại</p>
+                    <p id="stat-fund" class="text-3xl font-black">0K</p>
+                </div>
+                <div class="w-[1px] h-10 bg-white/20"></div>
+                <div class="text-center flex-1">
+                    <p class="text-[10px] uppercase font-bold opacity-70">Tổng đã chi</p>
+                    <p id="stat-spent" class="text-3xl font-black">0K</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <main class="max-w-md mx-auto p-4 mt-2 pb-40">
+        <!-- Tab Báo Cáo -->
+        <div id="tab-report" class="tab-content active space-y-4">
+            <div class="bg-white p-2 rounded-2xl flex shadow-sm border border-slate-100">
+                <input id="input-member" class="flex-1 px-4 py-3 outline-none font-bold text-sm bg-transparent" placeholder="Tên thành viên mới...">
+                <button onclick="app.addMember()" class="bg-slate-900 text-white p-3 rounded-xl active:scale-90 transition-transform">
+                    <i data-lucide="user-plus"></i>
+                </button>
+            </div>
+            <div id="member-list" class="space-y-4"></div>
+        </div>
+
+        <!-- Tab Lịch Sử -->
+        <div id="tab-history" class="tab-content space-y-3">
+            <div id="expense-list" class="space-y-3"></div>
+        </div>
+    </main>
+
+    <!-- Floating Button -->
+    <div class="fixed bottom-28 left-0 right-0 flex justify-center pointer-events-none z-50">
+        <button onclick="app.openExpenseModal()" class="w-16 h-16 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center pointer-events-auto active:scale-90 transition-transform border-4 border-white">
+            <i data-lucide="plus" class="w-8 h-8"></i>
+        </button>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-100 safe-bottom p-4 flex justify-around rounded-t-[2.5rem] shadow-2xl z-50">
+        <button onclick="app.switchTab('report')" id="nav-report" class="flex flex-col items-center gap-1 text-indigo-600">
+            <i data-lucide="layout-grid"></i>
+            <span class="text-[10px] font-black uppercase tracking-tighter">Thành viên</span>
+        </button>
+        <div class="w-16"></div>
+        <button onclick="app.switchTab('history')" id="nav-history" class="flex flex-col items-center gap-1 text-slate-300">
+            <i data-lucide="history"></i>
+            <span class="text-[10px] font-black uppercase tracking-tighter">Lịch sử</span>
+        </button>
+    </nav>
+
+    <!-- Modal: Thêm Chi Tiêu -->
+    <div id="modal-expense" class="modal items-end">
+        <div class="bg-white w-full rounded-t-[3rem] p-8 safe-bottom animate-up max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-black uppercase italic flex items-center gap-2">
+                    <i data-lucide="shopping-bag"></i> Ghi chi tiêu mới
+                </h2>
+                <button onclick="app.closeModals()" class="text-slate-300"><i data-lucide="x"></i></button>
+            </div>
+
+            <div class="space-y-4 mb-6">
+                <div>
+                    <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nội dung</label>
+                    <input id="exp-desc" class="w-full bg-slate-50 p-4 rounded-2xl outline-none font-bold" placeholder="VD: Taxi, Ăn trưa...">
+                </div>
+                
+                <div>
+                    <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Số tiền (K)</label>
+                    <input id="exp-amount" type="number" class="w-full bg-slate-50 p-4 rounded-2xl outline-none font-black text-3xl" placeholder="0">
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Ai trả tiền?</label>
+                    <select id="exp-payer" class="w-full bg-slate-50 p-4 rounded-2xl outline-none font-bold appearance-none">
+                        <option value="fund">Trích từ Quỹ chung</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-black uppercase text-slate-400 ml-2 mb-2 block">Chia cho những ai?</label>
+                    <div id="split-selectors" class="grid grid-cols-2 gap-2">
+                        <!-- Danh sách thành viên chọn để chia -->
+                    </div>
+                </div>
+            </div>
+
+            <button onclick="app.saveExpense()" class="w-full py-5 bg-slate-900 text-white rounded-3xl font-black uppercase shadow-xl active:scale-95 transition-all">Lưu hóa đơn</button>
+        </div>
+    </div>
+
+    <!-- Modal: Nộp Quỹ -->
+    <div id="modal-contribute" class="modal items-center justify-center p-6">
+        <div class="bg-white w-full max-w-sm rounded-[3rem] p-8 text-center shadow-2xl">
+            <h3 class="font-black uppercase mb-1">Thành viên nộp quỹ</h3>
+            <p id="contribute-name" class="text-sm text-slate-400 mb-6 font-bold"></p>
+            <input id="contribute-amount" type="number" class="w-full p-5 bg-slate-50 rounded-2xl mb-6 font-black text-4xl text-center text-emerald-600 outline-none" placeholder="0K">
+            <div class="flex gap-3">
+                <button onclick="app.closeModals()" class="flex-1 py-4 bg-slate-100 rounded-2xl font-black uppercase text-slate-400">Hủy</button>
+                <button onclick="app.saveContribution()" class="flex-[2] py-4 bg-emerald-500 text-white rounded-2xl font-black uppercase">Xác nhận</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const app = {
+            members: JSON.parse(localStorage.getItem('tsp_m') || '[]'),
+            expenses: JSON.parse(localStorage.getItem('tsp_e') || '[]'),
+            contributions: JSON.parse(localStorage.getItem('tsp_c') || '[]'),
+            currentMemberId: null,
+
+            init() {
+                this.render();
+                lucide.createIcons();
+            },
+
+            save() {
+                localStorage.setItem('tsp_m', JSON.stringify(this.members));
+                localStorage.setItem('tsp_e', JSON.stringify(this.expenses));
+                localStorage.setItem('tsp_c', JSON.stringify(this.contributions));
+                this.render();
+            },
+
+            addMember() {
+                const input = document.getElementById('input-member');
+                const name = input.value.trim();
+                if (!name) return;
+                this.members.push({ id: 'm' + Date.now(), name });
+                input.value = '';
+                this.save();
+            },
+
+            deleteMember(id) {
+                if (!confirm("Xóa thành viên?")) return;
+                this.members = this.members.filter(m => m.id !== id);
+                this.contributions = this.contributions.filter(c => c.memberId !== id);
+                this.save();
+            },
+
+            openExpenseModal() {
+                if(this.members.length === 0) { alert("Thêm thành viên trước!"); return; }
+                
+                const payerSelect = document.getElementById('exp-payer');
+                payerSelect.innerHTML = '<option value="fund">Trích từ Quỹ chung</option>';
+                this.members.forEach(m => {
+                    payerSelect.innerHTML += `<option value="${m.id}">${m.name} trả hộ</option>`;
+                });
+
+                const splitDiv = document.getElementById('split-selectors');
+                splitDiv.innerHTML = this.members.map(m => `
+                    <div class="relative">
+                        <input type="checkbox" id="split-${m.id}" value="${m.id}" class="hidden checkbox-custom" checked>
+                        <label for="split-${m.id}" class="block p-3 rounded-xl border-2 border-slate-100 text-center text-[10px] font-black uppercase tracking-tight">
+                            ${m.name}
+                        </label>
+                    </div>
+                `).join('');
+
+                document.getElementById('modal-expense').classList.add('active');
+                lucide.createIcons();
+            },
+
+            saveExpense() {
+                const desc = document.getElementById('exp-desc').value;
+                const amount = parseFloat(document.getElementById('exp-amount').value);
+                const payerId = document.getElementById('exp-payer').value;
+                const splitWith = Array.from(document.querySelectorAll('.checkbox-custom:checked')).map(cb => cb.value);
+
+                if (!desc || !amount || splitWith.length === 0) {
+                    alert("Điền đủ thông tin!");
+                    return;
+                }
+
+                this.expenses.unshift({
+                    id: 'e' + Date.now(),
+                    desc,
+                    amount,
+                    payerId,
+                    splitWith,
+                    date: new Date().toLocaleDateString('vi-VN', {hour: '2-digit', minute:'2-digit'})
+                });
+
+                document.getElementById('exp-desc').value = '';
+                document.getElementById('exp-amount').value = '';
+                this.closeModals();
+                this.save();
+            },
+
+            openContribute(id, name) {
+                this.currentMemberId = id;
+                document.getElementById('contribute-name').innerText = name;
+                document.getElementById('modal-contribute').classList.add('active');
+            },
+
+            saveContribution() {
+                const amount = parseFloat(document.getElementById('contribute-amount').value);
+                if (!amount) return;
+                this.contributions.push({
+                    id: 'c' + Date.now(),
+                    memberId: this.currentMemberId,
+                    amount,
+                    date: new Date().toLocaleDateString('vi-VN')
+                });
+                document.getElementById('contribute-amount').value = '';
+                this.closeModals();
+                this.save();
+            },
+
+            closeModals() {
+                document.querySelectorAll('.modal').forEach(m => m.classList.remove('active'));
+            },
+
+            switchTab(tab) {
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                document.getElementById('tab-' + tab).classList.add('active');
+                document.getElementById('nav-report').classList.toggle('text-indigo-600', tab === 'report');
+                document.getElementById('nav-report').classList.toggle('text-slate-300', tab !== 'report');
+                document.getElementById('nav-history').classList.toggle('text-indigo-600', tab === 'history');
+                document.getElementById('nav-history').classList.toggle('text-slate-300', tab !== 'history');
+            },
+
+            clearData() {
+                if (confirm("Xóa hết dữ liệu?")) {
+                    localStorage.clear();
+                    location.reload();
+                }
+            },
+
+            render() {
+                const totalSpentOverall = this.expenses.reduce((s, e) => s + e.amount, 0);
+                const totalFundIn = this.contributions.reduce((s, c) => s + c.amount, 0);
+                const spentFromFund = this.expenses.filter(e => e.payerId === 'fund').reduce((s, e) => s + e.amount, 0);
+                const currentFund = totalFundIn - spentFromFund;
+
+                document.getElementById('stat-fund').innerText = Math.round(currentFund).toLocaleString() + 'K';
+                document.getElementById('stat-spent').innerText = Math.round(totalSpentOverall).toLocaleString() + 'K';
+                document.getElementById('header-bg').className = `safe-top p-6 rounded-b-[2.5rem] shadow-xl text-white transition-colors duration-500 ${currentFund < 0 ? 'bg-rose-500' : 'bg-indigo-600'}`;
+
+                // Render Members
+                const list = document.getElementById('member-list');
+                list.innerHTML = this.members.map(m => {
+                    const paidToFund = this.contributions.filter(c => c.memberId === m.id).reduce((s, c) => s + c.amount, 0);
+                    const paidSub = this.expenses.filter(e => e.payerId === m.id).reduce((s, e) => s + e.amount, 0);
+                    
+                    const cost = this.expenses.reduce((acc, exp) => {
+                        if (exp.splitWith.includes(m.id)) {
+                            return acc + (exp.amount / exp.splitWith.length);
+                        }
+                        return acc;
+                    }, 0);
+
+                    const bal = (paidToFund + paidSub) - cost;
+
+                    return `
+                        <div class="bg-white rounded-[2rem] p-5 shadow-sm border border-slate-100">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="font-black uppercase text-slate-800">${m.name}</h3>
+                                <div class="flex gap-2">
+                                    <button onclick="app.openContribute('${m.id}', '${m.name}')" class="bg-emerald-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase active:scale-90 transition-transform">Nộp quỹ</button>
+                                    <button onclick="app.deleteMember('${m.id}')" class="text-slate-200 p-2"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-3 gap-2 text-center text-[10px]">
+                                <div class="bg-slate-50 p-2 rounded-xl">
+                                    <p class="text-slate-400 font-bold uppercase mb-1">Đã bỏ ra</p>
+                                    <p class="font-black text-slate-700">${Math.round(paidToFund + paidSub)}K</p>
+                                </div>
+                                <div class="bg-slate-50 p-2 rounded-xl">
+                                    <p class="text-slate-400 font-bold uppercase mb-1">Gánh chi</p>
+                                    <p class="font-black text-slate-700">${Math.round(cost)}K</p>
+                                </div>
+                                <div class="p-2 rounded-xl ${bal >= 0 ? 'bg-indigo-50 text-indigo-600' : 'bg-rose-50 text-rose-600'}">
+                                    <p class="opacity-60 font-bold uppercase mb-1">Dư/Nợ</p>
+                                    <p class="font-black">${bal >= 0 ? '+' : ''}${Math.round(bal)}K</p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                // Render History
+                const eList = document.getElementById('expense-list');
+                eList.innerHTML = this.expenses.map(e => {
+                    const payerName = e.payerId === 'fund' ? 'Quỹ' : (this.members.find(m => m.id === e.payerId)?.name || 'Ẩn danh');
+                    return `
+                        <div class="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col gap-3">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="font-black text-slate-800">${e.desc}</p>
+                                    <p class="text-[10px] text-slate-400 font-bold uppercase">${e.date} • Trả bởi: ${payerName}</p>
+                                </div>
+                                <div class="text-right">
+                                    <p class="font-black text-rose-500">-${e.amount.toLocaleString()}K</p>
+                                    <button onclick="app.deleteExpense('${e.id}')" class="text-[8px] font-black text-slate-300 uppercase">Xóa</button>
+                                </div>
+                            </div>
+                            <div class="flex flex-wrap gap-1">
+                                ${e.splitWith.map(sid => `<span class="px-2 py-0.5 bg-slate-100 rounded-full text-[8px] font-bold text-slate-500 uppercase">${this.members.find(m=>m.id===sid)?.name || '?'}</span>`).join('')}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                lucide.createIcons();
+            },
+
+            deleteExpense(id) {
+                if(!confirm("Xóa hóa đơn này?")) return;
+                this.expenses = this.expenses.filter(e => e.id !== id);
+                this.save();
+            }
+        };
+
+        window.onload = () => app.init();
+    </script>
+</body>
+</html>
