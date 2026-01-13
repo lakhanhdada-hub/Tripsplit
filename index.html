@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>TripSplit Cloud</title>
+    
+    <!-- iOS PWA Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="TripSplit">
+    
+    <!-- Tailwind CSS & Lucide Icons -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- React & Firebase SDKs -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <script type="importmap">
+    {
+      "imports": {
+        "firebase/app": "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js",
+        "firebase/auth": "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"
+      }
+    }
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+        
+        :root {
+            --sat: env(safe-area-inset-top);
+            --sar: env(safe-area-inset-right);
+            --sab: env(safe-area-inset-bottom);
+            --sal: env(safe-area-inset-left);
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            background-color: #f8fafc;
+            overscroll-behavior-y: contain;
+        }
+
+        input, select, textarea {
+            user-select: text;
+            font-size: 16px !important; /* Ngăn chặn iOS zoom khi focus */
+        }
+
+        .safe-pb { padding-bottom: var(--sab); }
+        .safe-pt { padding-top: var(--sat); }
+
+        @keyframes bounce-in {
+            0% { transform: translateY(-20px); opacity: 0; }
+            60% { transform: translateY(5px); opacity: 1; }
+            100% { transform: translateY(0); }
+        }
+        .animate-bounce-in { animation: bounce-in 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .animate-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .zoom-in { animation: zoomIn 0.2s ease-out; }
+        @keyframes zoomIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        
+        ::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="module" typeof="text/babel">
+        import { initializeApp } from "firebase/app";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
+        import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, updateDoc, deleteDoc, query } from "firebase/firestore";
+
+        const { useState, useMemo, useEffect } = React;
+
+        // --- GLOBAL CONFIGS (Provided by environment or default) ---
+        const firebaseConfig = JSON.parse(window.__firebase_config || '{}');
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'tripsplit-v1';
+
+        // --- LUCIDE ICON COMPONENT ---
+        const Icon = ({ name, size = 24, className = "" }) => {
+            const [iconSvg, setIconSvg] = useState("");
+            useEffect(() => {
+                if (window.lucide) {
+                    const icon = window.lucide.icons[name];
+                    if (icon) setIconSvg(icon.toSvg({ width: size, height: size, class: className }));
+                }
+            }, [name, size, className]);
+            return <span dangerouslySetInnerHTML={{ __html: iconSvg }} />;
+        };
+
+        const App = () => {
+            // --- AUTH & SYNC STATE ---
+            const [user, setUser] = useState(null);
+            const [loading, setLoading] = useState(true);
+            
+            // --- APP DATA STATE ---
+            const [members, setMembers] = useState([]);
+            const [expenses, setExpenses] = useState([]);
+            const [contributions, setContributions] = useState([]);
+            const [treasurerId, setTreasurerId] = useState(null);
+
+            // --- UI STATE ---
+            const [newMemberName, setNewMemberName] = useState('');
+            const [activeTab, setActiveTab] = useState('report'); 
+            const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+            const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+            const [memberToDelete, setMemberToDelete] = useState(null); 
+            const [copySuccess, setCopySuccess] = useState(false);
+            const [showContributionId, setShowContributionId] = useState(null);
+            const [description, setDescription] = useState('');
+            const [amount, setAmount] = useState('');
+            const [payerId, setPayerId] = useState('fund'); 
+            const [splitWith, setSplitWith] = useState([]); 
+            const [isAdvance, setIsAdvance] = useState(false);
+            const [editingExpenseId, setEditingExpenseId] = useState(null);
+            const [reminders, setReminders] = useState([]);
+
+            // --- INITIALIZE AUTH ---
+            useEffect(() => {
+                const initAuth = async () => {
+                    try {
+                        if (typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
+                            await signInWithCustomToken(auth, window.__initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (error) {
+                        console.error("Auth error:", error);
+                    }
+                };
+                initAuth();
+                const unsubscribe = onAuthStateChanged(auth, (u) => {
+                    setUser(u);
+                    setLoading(false);
+                });
+                return () => unsubscribe();
+            }, []);
+
+            // --- REAL-TIME DATA SYNC ---
+            useEffect(() => {
+                if (!user) return;
+                const pathPrefix = `artifacts/${appId}/public/data`;
+                
+                const unsubMembers = onSnapshot(collection(db, `${pathPrefix}/members`), (snapshot) => {
+                    setMembers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                }, (err) => console.error("Members error:", err));
+
+                const unsubExpenses = onSnapshot(collection(db, `${pathPrefix}/expenses`), (snapshot) => {
+                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setExpenses(data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+                }, (err) => console.error("Expenses error:", err));
+
+                const unsubContributions = onSnapshot(collection(db, `${pathPrefix}/contributions`), (snapshot) => {
+                    setContributions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                }, (err) => console.error("Contributions error:", err));
+
+                const unsubSettings = onSnapshot(doc(db, `${pathPrefix}/settings`, 'global'), (doc) => {
+                    if (doc.exists()) setTreasurerId(doc.data().treasurerId);
+                }, (err) => console.error("Settings error:", err));
+
+                return () => {
+                    unsubMembers(); unsubExpenses(); unsubContributions(); unsubSettings();
+                };
+            }, [user]);
+
+            // --- REMINDERS LOGIC ---
+            useEffect(() => {
+                const checkReminders = () => {
+                    const now = Date.now();
+                    const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
+                    const pendingReminders = expenses.filter(e => {
+                        if (!e.isAdvance || e.reminderDismissed) return false;
+                        const lastCheck = e.lastReminderAt || e.createdAt;
+                        return (now - lastCheck) >= TWELVE_HOURS_MS;
+                    });
+                    setReminders(pendingReminders);
+                };
+                const interval = setInterval(checkReminders, 60000);
+                checkReminders();
+                return () => clearInterval(interval);
+            }, [expenses]);
+
+            // --- ACTIONS ---
+            const handleAddMember = async () => {
+                if (!newMemberName || !user) return;
+                await addDoc(collection(db, `artifacts/${appId}/public/data/members`), {
+                    name: newMemberName,
+                    createdAt: Date.now()
+                });
+                setNewMemberName('');
+            };
+
+            const handleDeleteMember = async (mId) => {
+                if (!user) return;
+                await deleteDoc(doc(db, `artifacts/${appId}/public/data/members`, mId));
+                if (treasurerId === mId) handleSetTreasurer(null);
+                setMemberToDelete(null);
+            };
+
+            const handleSetTreasurer = async (tId) => {
+                if (!user) return;
+                await setDoc(doc(db, `artifacts/${appId}/public/data/settings`, 'global'), { treasurerId: tId });
+            };
+
+            const handleSaveExpense = async () => {
+                const val = parseFloat(amount);
+                if (!description || isNaN(val) || val <= 0 || splitWith.length === 0 || !user) return;
+                const now = Date.now();
+                const formattedDate = new Date().toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+                
+                const expenseData = {
+                    description, amount: val, payerId, splitWith, isAdvance,
+                    date: formattedDate,
+                    createdAt: editingExpenseId ? expenses.find(e => e.id === editingExpenseId).createdAt : now,
+                    lastReminderAt: now,
+                    reminderDismissed: false
+                };
+
+                if (editingExpenseId) {
+                    await updateDoc(doc(db, `artifacts/${appId}/public/data/expenses`, editingExpenseId), expenseData);
+                } else {
+                    await addDoc(collection(db, `artifacts/${appId}/public/data/expenses`), expenseData);
+                }
+                setIsExpenseModalOpen(false); setEditingExpenseId(null); setDescription(''); setAmount(''); setPayerId('fund');
+            };
+
+            const handleContribution = async () => {
+                const val = parseFloat(amount);
+                if (val > 0 && showContributionId && user) {
+                    await addDoc(collection(db, `artifacts/${appId}/public/data/contributions`), {
+                        memberId: showContributionId, amount: val,
+                        date: new Date().toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }),
+                        createdAt: Date.now()
+                    });
+                    setAmount(''); setShowContributionId(null);
+                }
+            };
+
+            const handleReminderAction = async (expenseId, action) => {
+                if (!user) return;
+                const ref = doc(db, `artifacts/${appId}/public/data/expenses`, expenseId);
+                if (action === 'dismiss') await updateDoc(ref, { reminderDismissed: true });
+                if (action === 'snooze') await updateDoc(ref, { lastReminderAt: Date.now() });
+            };
+
+            // --- COMPUTED STATS ---
+            const allContributions = useMemo(() => {
+                const manual = contributions.map(c => ({ ...c, type: 'manual' }));
+                const help = expenses.filter(e => e.payerId !== 'fund').map(e => ({
+                    id: `help-${e.id}`, memberId: e.payerId, amount: e.amount, date: e.date,
+                    description: `Chi hộ: ${e.description}`, type: 'help', createdAt: e.createdAt
+                }));
+                return [...manual, ...help].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            }, [contributions, expenses]);
+
+            const stats = useMemo(() => {
+                const totalSpent = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+                const totalCashIn = contributions.reduce((sum, c) => sum + c.amount, 0);
+                const fundSpent = expenses.filter(e => e.payerId === 'fund').reduce((sum, e) => sum + e.amount, 0);
+                const currentFund = totalCashIn - fundSpent;
+                const memberStats = members.map(m => {
+                    const cashIn = contributions.filter(c => c.memberId === m.id).reduce((sum, c) => sum + c.amount, 0);
+                    const helpOut = expenses.filter(e => e.payerId === m.id).reduce((sum, e) => sum + e.amount, 0);
+                    const totalContributed = cashIn + helpOut;
+                    const totalEnjoyed = expenses.reduce((sum, exp) => {
+                        if (exp.splitWith && exp.splitWith.includes(m.id)) return sum + (exp.amount / exp.splitWith.length);
+                        return sum;
+                    }, 0);
+                    return { ...m, totalContributed, totalEnjoyed, balance: totalContributed - totalEnjoyed };
+                });
+                return { totalSpent, currentFund, memberStats };
+            }, [members, expenses, contributions]);
+
+            const generateReportText = () => {
+                let report = `📊 BÁO CÁO DU LỊCH (${new Date().toLocaleDateString('vi-VN')})\n`;
+                report += `----------------------------------\n`;
+                report += `💰 Tổng chi: ${stats.totalSpent.toLocaleString()}K\n`;
+                report += `🏦 Quỹ còn: ${stats.currentFund.toLocaleString()}K\n\n`;
+                report += `👤 CHI TIẾT THÀNH VIÊN:\n`;
+                stats.memberStats.forEach(m => {
+                    const tag = m.id === treasurerId ? ' (Thủ quỹ)' : '';
+                    const status = m.balance >= 0 ? `Dư: +${m.balance.toFixed(1)}K` : `Nợ: ${Math.abs(m.balance).toFixed(1)}K`;
+                    report += `- ${m.name}${tag}:\n  + Đóng/Hộ: ${m.totalContributed.toLocaleString()}K\n  + Đã dùng: ${m.totalEnjoyed.toFixed(1)}K\n  => ${status}\n`;
+                });
+                report += `\n📝 NHẬT KÝ CHI TIÊU:\n`;
+                expenses.slice(0, 10).forEach((e, idx) => {
+                    const p = e.payerId === 'fund' ? 'Quỹ' : members.find(m => m.id === e.payerId)?.name || 'N/A';
+                    report += `${idx + 1}. [${e.date}] ${e.isAdvance ? '[Tạm ứng] ' : ''}${e.description}: ${e.amount}K (${p})\n`;
+                });
+                return report + `\n----------------------------------\nXuất từ TripSplit Cloud App`;
+            };
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center space-y-4">
+                        <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                        <p className="text-xs font-black uppercase tracking-widest text-indigo-600">Đang đồng bộ đám mây...</p>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen pb-32 overflow-x-hidden bg-slate-50 safe-pb">
+                    {/* --- TOP NOTIFICATIONS --- */}
+                    <div className="fixed top-[calc(env(safe-area-inset-top)+1rem)] left-4 right-4 z-[100] space-y-3 max-w-md mx-auto pointer-events-none">
+                        {reminders.map(r => (
+                            <div key={r.id} className="bg-slate-900 text-white p-5 rounded-[2rem] shadow-2xl border border-white/10 pointer-events-auto animate-bounce-in">
+                                <div className="flex gap-4">
+                                    <div className="p-3 bg-amber-500 rounded-2xl shrink-0"><Icon name="Bell" className="text-slate-900" size={20} /></div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-amber-500 uppercase">Chưa xử lý tạm ứng</p>
+                                        <p className="text-xs font-bold mt-1">"{r.description}" ({r.amount}K) quá 12h.</p>
+                                    </div>
+                                </div>
+                                <div className="flex gap-2 mt-4">
+                                    <button onClick={() => handleReminderAction(r.id, 'snooze')} className="flex-1 py-3 bg-white/10 rounded-xl text-[10px] font-black uppercase">Nhắc lại</button>
+                                    <button onClick={() => handleReminderAction(r.id, 'dismiss')} className="flex-1 py-3 bg-indigo-600 rounded-xl text-[10px] font-black uppercase">Đã xong</button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* --- HEADER --- */}
+                    <header className={`p-6 pb-12 rounded-b-[3rem] shadow-xl sticky top-0 z-40 transition-colors duration-500 safe-pt ${stats.currentFund < 0 ? 'bg-rose-600' : 'bg-indigo-600'} text-white`}>
+                        <div className="max-w-md mx-auto">
+                            <div className="flex justify-between items-center mb-6">
+                                <h1 className="text-xl font-black flex items-center gap-2 tracking-tighter uppercase">
+                                    <Icon name="Wallet" size={24} /> TRIPSPLIT
+                                </h1>
+                                <div className="flex items-center gap-2 bg-white/10 px-3 py-1 rounded-full text-[10px] font-black">
+                                    <Icon name="RefreshCw" size={12} className="animate-spin" /> LIVE
+                                </div>
+                            </div>
+                            
+                            <div className="flex justify-between items-center bg-white/10 backdrop-blur-md rounded-[2rem] p-4 border border-white/20">
+                                <div className="text-center flex-1">
+                                    <p className="text-[9px] font-bold opacity-70 uppercase">Quỹ hiện tại</p>
+                                    <p className="text-xl font-black tabular-nums">{stats.currentFund.toLocaleString()}K</p>
+                                </div>
+                                <button 
+                                    onClick={() => { if (members.length > 0) { setSplitWith(members.map(m => m.id)); setIsExpenseModalOpen(true); } }}
+                                    className="w-14 h-14 bg-slate-900 rounded-full flex items-center justify-center shadow-lg active:scale-90 disabled:opacity-50"
+                                    disabled={members.length === 0}
+                                >
+                                    <Icon name="Plus" className="text-white" />
+                                </button>
+                                <div className="text-center flex-1">
+                                    <p className="text-[9px] font-bold opacity-70 uppercase">Tổng đã chi</p>
+                                    <p className="text-xl font-black tabular-nums">{stats.totalSpent.toLocaleString()}K</p>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="max-w-md mx-auto p-4 space-y-6">
+                        {activeTab === 'report' && (
+                            <div className="space-y-6 animate-in">
+                                <div className="bg-white p-4 rounded-[2rem] shadow-sm flex gap-2">
+                                    <input className="flex-1 px-4 py-3 bg-slate-50 rounded-xl text-sm font-bold outline-none" placeholder="Thêm bạn bè..." value={newMemberName} onChange={e => setNewMemberName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddMember()} />
+                                    <button onClick={handleAddMember} className="p-3 bg-slate-900 text-white rounded-xl active:scale-95"><Icon name="Plus" /></button>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div className="flex justify-between items-center px-2">
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Danh sách thành viên</p>
+                                        <button onClick={() => setIsShareModalOpen(true)} className="text-indigo-600 text-xs font-black flex items-center gap-1">
+                                            <Icon name="Share2" size={14}/> XUẤT BÁO CÁO
+                                        </button>
+                                    </div>
+                                    {members.length === 0 && (
+                                        <div className="text-center py-10 opacity-30">
+                                            <Icon name="User" size={48} className="mx-auto mb-2" />
+                                            <p className="text-xs font-bold uppercase">Chưa có ai trong chuyến đi</p>
+                                        </div>
+                                    )}
+                                    {members.map(m => {
+                                        const mStats = stats.memberStats.find(s => s.id === m.id);
+                                        return (
+                                            <div key={m.id} className={`bg-white p-5 rounded-[2.5rem] border shadow-sm transition-all duration-300 ${treasurerId === m.id ? 'border-amber-200 ring-4 ring-amber-100' : 'border-slate-100'}`}>
+                                                <div className="flex justify-between items-start mb-5">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${treasurerId === m.id ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-400'}`}>
+                                                            {treasurerId === m.id ? <Icon name="Crown" size={20} /> : <Icon name="User" size={20} />}
+                                                        </div>
+                                                        <div>
+                                                            <h4 className="font-black text-lg uppercase tracking-tight">{m.name}</h4>
+                                                            <button onClick={() => handleSetTreasurer(treasurerId === m.id ? null : m.id)} className={`text-[9px] font-bold uppercase ${treasurerId === m.id ? 'text-amber-500' : 'text-slate-300'}`}>{treasurerId === m.id ? 'Đang giữ quỹ' : 'Phân giữ quỹ'}</button>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => { setAmount(''); setShowContributionId(m.id); }} className="bg-emerald-500 text-white px-3 py-2 rounded-xl text-[10px] font-black shadow-lg">NỘP QUỸ</button>
+                                                        <button onClick={() => setMemberToDelete(m)} className="p-2 text-slate-200"><Icon name="Trash2" size={16}/></button>
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-3 gap-2">
+                                                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100/50">
+                                                        <Icon name="ArrowDownLeft" size={10} className="text-emerald-500 mb-1" />
+                                                        <p className="text-[8px] font-bold text-slate-400 uppercase">Đã đóng</p>
+                                                        <p className="text-sm font-black text-slate-700">{mStats?.totalContributed.toLocaleString()}K</p>
+                                                    </div>
+                                                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100/50">
+                                                        <Icon name="ArrowUpRight" size={10} className="text-rose-400 mb-1" />
+                                                        <p className="text-[8px] font-bold text-slate-400 uppercase">Đã dùng</p>
+                                                        <p className="text-sm font-black text-slate-700">{mStats?.totalEnjoyed.toLocaleString(undefined, {maximumFractionDigits:1})}K</p>
+                                                    </div>
+                                                    <div className={`p-3 rounded-2xl border ${mStats?.balance >= 0 ? 'bg-indigo-50 border-indigo-100' : 'bg-rose-50 border-rose-100'}`}>
+                                                        <p className="text-[8px] font-bold text-slate-400 uppercase mb-1">{mStats?.balance >= 0 ? 'Dư (+)' : 'Nợ (-)'}</p>
+                                                        <p className={`text-sm font-black ${mStats?.balance >= 0 ? 'text-indigo-600' : 'text-rose-600'}`}>{mStats?.balance.toLocaleString(undefined, {maximumFractionDigits:1})}K</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'history_spent' && (
+                            <div className="space-y-4 animate-in">
+                                <h3 className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">Lịch sử chi tiêu</h3>
+                                {expenses.map(e => (
+                                    <div key={e.id} className="bg-white p-5 rounded-[2.5rem] border border-slate-100 flex justify-between items-center shadow-sm">
+                                        <div className="flex items-center gap-4">
+                                            <div className={`p-3 rounded-2xl ${e.isAdvance ? 'bg-amber-50 text-amber-600' : 'bg-indigo-50 text-indigo-600'}`}>
+                                                {e.isAdvance ? <Icon name="Clock" size={18}/> : <Icon name="Receipt" size={18}/>}
+                                            </div>
+                                            <div>
+                                                <p className="font-black text-sm">{e.description}</p>
+                                                <p className="text-[9px] font-bold text-slate-400 uppercase">{e.date} • {e.payerId === 'fund' ? 'Quỹ' : members.find(m => m.id === e.payerId)?.name}</p>
+                                            </div>
+                                        </div>
+                                        <div className="text-right flex flex-col items-end gap-1">
+                                            <p className="font-black text-rose-500">-{e.amount.toLocaleString()}K</p>
+                                            <div className="flex gap-2 opacity-50">
+                                                <button onClick={() => {
+                                                    setEditingExpenseId(e.id); setDescription(e.description);
+                                                    setAmount(e.amount.toString()); setPayerId(e.payerId);
+                                                    setSplitWith(e.splitWith); setIsAdvance(e.isAdvance);
+                                                    setIsExpenseModalOpen(true);
+                                                }} className="text-indigo-400"><Icon name="Edit2" size={14}/></button>
+                                                <button onClick={() => deleteDoc(doc(db, `artifacts/${appId}/public/data/expenses`, e.id))} className="text-slate-200"><Icon name="Trash2" size={14}/></button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {activeTab === 'history_deposit' && (
+                            <div className="space-y-4 animate-in">
+                                <h3 className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">Nộp tiền & Chi hộ</h3>
+                                {allContributions.map(c => (
+                                    <div key={c.id} className="bg-white p-5 rounded-3xl border border-slate-100 flex justify-between items-center shadow-sm">
+                                        <div className="flex items-center gap-4">
+                                            <div className={`p-3 rounded-2xl ${c.type === 'manual' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                                                {c.type === 'manual' ? <Icon name="ArrowDownLeft" size={18}/> : <Icon name="UserCheck" size={18}/>}
+                                            </div>
+                                            <div>
+                                                <p className="font-black text-sm">{members.find(m => m.id === c.memberId)?.name || 'N/A'}</p>
+                                                <p className="text-[9px] font-bold text-slate-400 uppercase">{c.description || 'Nộp quỹ'} • {c.date}</p>
+                                            </div>
+                                        </div>
+                                        <p className={`font-black text-lg ${c.type === 'manual' ? 'text-emerald-600' : 'text-amber-600'}`}>+{c.amount.toLocaleString()}K</p>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </main>
+
+                    {/* MODALS */}
+                    {isExpenseModalOpen && (
+                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-end justify-center">
+                            <div className="bg-white w-full max-w-md rounded-t-[3rem] p-8 shadow-2xl animate-in safe-pb" style={{marginBottom: 'env(safe-area-inset-bottom)'}}>
+                                <div className="flex justify-between items-center mb-6">
+                                    <h2 className="text-xl font-black italic uppercase">{editingExpenseId ? 'Sửa hóa đơn' : 'Ghi hóa đơn'}</h2>
+                                    <button onClick={() => { setIsExpenseModalOpen(false); setEditingExpenseId(null); setDescription(''); setAmount(''); }} className="p-2 bg-slate-100 rounded-full"><Icon name="X" size={20}/></button>
+                                </div>
+                                <div className="space-y-5">
+                                    <input className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none" placeholder="Lý do chi..." value={description} onChange={e => setDescription(e.target.value)} />
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="relative">
+                                            <input type="number" className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-black text-indigo-600 outline-none" placeholder="Số tiền" value={amount} onChange={e => setAmount(e.target.value)} />
+                                            <span className="absolute right-4 top-4 text-xs font-black text-slate-300">K</span>
+                                        </div>
+                                        <select className="w-full px-4 py-4 bg-slate-50 rounded-2xl font-bold outline-none text-[10px] appearance-none" value={payerId} onChange={e => setPayerId(e.target.value)}>
+                                            <option value="fund">💰 Từ Quỹ nhóm</option>
+                                            {members.filter(m => m.id !== treasurerId).map(m => (
+                                                <option key={m.id} value={m.id}>👤 {m.name} trả hộ</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <button onClick={() => setIsAdvance(!isAdvance)} className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all ${isAdvance ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-transparent'}`}>
+                                        <div className="flex items-center gap-3">
+                                            <div className={`p-2 rounded-lg ${isAdvance ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-400'}`}><Icon name="Clock" size={16}/></div>
+                                            <p className={`text-xs font-black ${isAdvance ? 'text-indigo-600' : 'text-slate-400'}`}>Tạm ứng (nhắc sau 12h)</p>
+                                        </div>
+                                        <div className={`w-10 h-6 rounded-full p-1 transition-colors ${isAdvance ? 'bg-indigo-600' : 'bg-slate-300'}`}>
+                                            <div className={`w-4 h-4 bg-white rounded-full transition-transform ${isAdvance ? 'translate-x-4' : 'translate-x-0'}`}/>
+                                        </div>
+                                    </button>
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between items-center">
+                                            <p className="text-[9px] font-black text-slate-400 uppercase">Chia cho ai?</p>
+                                            <button onClick={() => setSplitWith(members.map(m => m.id))} className="text-[9px] font-black text-indigo-500 uppercase">Chọn tất cả</button>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2 p-3 bg-slate-50 rounded-2xl max-h-32 overflow-y-auto">
+                                            {members.map(m => (
+                                                <button key={m.id} onClick={() => setSplitWith(prev => prev.includes(m.id) ? prev.filter(i => i !== m.id) : [...prev, m.id])} className={`px-3 py-2 rounded-xl text-[10px] font-black border ${splitWith.includes(m.id) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-400 border-slate-100'}`}>{m.name}</button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <button onClick={handleSaveExpense} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-sm uppercase tracking-widest shadow-xl active:scale-95">
+                                        {editingExpenseId ? 'CẬP NHẬT' : 'LƯU HÓA ĐƠN'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showContributionId && (
+                        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[110] flex items-center justify-center p-6">
+                            <div className="bg-white w-full max-w-sm rounded-[3rem] p-10 shadow-2xl animate-in zoom-in">
+                                <h3 className="text-xl font-black mb-6 italic text-center text-slate-800 uppercase">Nộp tiền vào quỹ</h3>
+                                <div className="relative">
+                                    <input type="number" autoFocus className="w-full px-4 py-8 bg-slate-50 rounded-3xl font-black text-5xl text-center text-emerald-600 outline-none" placeholder="0" value={amount} onChange={e => setAmount(e.target.value)} />
+                                    <span className="absolute right-4 bottom-4 font-black text-slate-200">K</span>
+                                </div>
+                                <p className="text-center text-[10px] font-bold text-slate-400 mt-4 uppercase">Người nộp: {members.find(m => m.id === showContributionId)?.name}</p>
+                                <div className="flex gap-3 mt-8">
+                                    <button onClick={() => { setShowContributionId(null); setAmount(''); }} className="flex-1 py-4 font-black bg-slate-100 rounded-2xl text-[10px] uppercase">Hủy</button>
+                                    <button onClick={handleContribution} className="flex-[2] py-4 font-black bg-emerald-500 text-white rounded-2xl shadow-lg uppercase text-[10px] active:scale-95">Xác nhận</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {isShareModalOpen && (
+                        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[80] flex items-center justify-center p-6">
+                            <div className="bg-white w-full max-w-md rounded-[3rem] p-8 shadow-2xl animate-in">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="font-black italic uppercase">Báo cáo</h3>
+                                    <button onClick={() => setIsShareModalOpen(false)} className="p-1 rounded-full bg-slate-100"><Icon name="X" size={18}/></button>
+                                </div>
+                                <div className="bg-slate-50 p-6 rounded-3xl mb-6 max-h-[50vh] overflow-y-auto border font-mono text-[10px] whitespace-pre-wrap leading-relaxed">
+                                    {generateReportText()}
+                                </div>
+                                <button onClick={() => {
+                                    const text = generateReportText();
+                                    const el = document.createElement('textarea'); el.value = text; document.body.appendChild(el); el.select(); document.execCommand('copy'); document.body.removeChild(el);
+                                    setCopySuccess(true); setTimeout(() => setCopySuccess(false), 2000);
+                                }} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black flex items-center justify-center gap-2 shadow-xl active:scale-95">
+                                    {copySuccess ? <Icon name="Check" size={18}/> : <Icon name="Copy" size={18}/>} 
+                                    {copySuccess ? 'ĐÃ SAO CHÉP!' : 'SAO CHÉP GỬI NHÓM'}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {memberToDelete && (
+                        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[100] flex items-center justify-center p-6">
+                            <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 text-center shadow-2xl animate-in zoom-in">
+                                <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4"><Icon name="TriangleAlert" size={32}/></div>
+                                <h4 className="font-black text-lg mb-2">Xóa {memberToDelete.name}?</h4>
+                                <div className="flex gap-2">
+                                    <button onClick={() => setMemberToDelete(null)} className="flex-1 py-4 bg-slate-100 font-black rounded-2xl text-[10px] uppercase">Hủy</button>
+                                    <button onClick={() => handleDeleteMember(memberToDelete.id)} className="flex-1 py-4 bg-rose-500 text-white font-black rounded-2xl text-[10px] uppercase active:scale-95">Xác nhận</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* --- BOTTOM NAV --- */}
+                    <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-slate-100 px-6 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] flex justify-around items-center z-40 max-w-md mx-auto rounded-t-[3rem] shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
+                        {[
+                            { id: 'report', icon: 'BarChart3', label: 'Thống kê' },
+                            { id: 'history_deposit', icon: 'HandCoins', label: 'Nộp quỹ' },
+                            { id: 'history_spent', icon: 'Receipt', label: 'Đã chi' }
+                        ].map(tab => (
+                            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex flex-col items-center gap-1 transition-all px-4 py-2 rounded-2xl ${activeTab === tab.id ? 'text-indigo-600 bg-indigo-50/50 scale-105' : 'text-slate-300'}`}>
+                                <Icon name={tab.icon} className={activeTab === tab.id ? 'stroke-[3px]' : 'stroke-[2px]'} size={20} />
+                                <span className="text-[8px] font-black uppercase tracking-wider">{tab.label}</span>
+                            </button>
+                        ))}
+                    </nav>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
